@@ -79,8 +79,11 @@ app.use(
         return callback(null, true);
       }
 
-      const list = allowed.split(',').map(o => o.trim().toLowerCase());
-      if (list.includes(origin.toLowerCase()) || origin.endsWith('.vercel.app')) {
+      // Normalize origin and allowed list by stripping trailing slashes
+      const cleanOrigin = origin.trim().replace(/\/+$/, '').toLowerCase();
+      const list = allowed.split(',').map(o => o.trim().replace(/\/+$/, '').toLowerCase());
+
+      if (list.includes(cleanOrigin) || cleanOrigin.endsWith('.vercel.app')) {
         return callback(null, true);
       }
 
