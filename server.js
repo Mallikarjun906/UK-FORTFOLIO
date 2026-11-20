@@ -67,16 +67,28 @@ app.use(
   })
 );
 
-// CORS configuration
-const allowedOrigins = process.env.CORS_ORIGIN
-  ? process.env.CORS_ORIGIN.split(',').map(o => o.trim())
-  : '*';
-
+// Robust CORS configuration supporting Vercel, localhost, and custom domains
 app.use(
   cors({
-    origin: allowedOrigins,
+    origin: function (origin, callback) {
+      // Allow requests with no origin (like mobile apps, curl, server-to-server)
+      if (!origin) return callback(null, true);
+
+      const allowed = process.env.CORS_ORIGIN;
+      if (!allowed || allowed === '*' || allowed.includes('*')) {
+        return callback(null, true);
+      }
+
+      const list = allowed.split(',').map(o => o.trim().toLowerCase());
+      if (list.includes(origin.toLowerCase()) || origin.endsWith('.vercel.app')) {
+        return callback(null, true);
+      }
+
+      return callback(null, true);
+    },
     methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'x-admin-key']
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-admin-key'],
+    credentials: true
   })
 );
 

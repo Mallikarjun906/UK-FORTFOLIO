@@ -7,19 +7,35 @@ const path = require('path');
 const fs = require('fs');
 const Database = require('better-sqlite3');
 
-// Ensure data directory exists
-const dataDir = path.join(__dirname, 'data');
-if (!fs.existsSync(dataDir)) {
-  fs.mkdirSync(dataDir, { recursive: true });
+// Determine database path with safe fallback for read-only/serverless environments
+let dbPath = process.env.DB_PATH;
+if (!dbPath) {
+  try {
+    const dataDir = path.join(__dirname, 'data');
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true });
+    }
+    const testFile = path.join(dataDir, '.write_test');
+    fs.writeFileSync(testFile, '1');
+    fs.unlinkSync(testFile);
+    dbPath = path.join(dataDir, 'uk_rentserve.db');
+  } catch (err) {
+    // Read-only filesystem fallback (e.g. Vercel serverless container)
+    const tmpDir = process.env.TMPDIR || '/tmp';
+    dbPath = path.join(tmpDir, 'uk_rentserve.db');
+  }
 }
 
-const dbPath = process.env.DB_PATH || path.join(dataDir, 'uk_rentserve.db');
 const db = new Database(dbPath, {
   // verbose: process.env.NODE_ENV === 'development' ? console.log : null
 });
 
-// Enable WAL mode for better concurrency and performance
-db.pragma('journal_mode = WAL');
+// Enable WAL mode if supported, fallback to DELETE
+try {
+  db.pragma('journal_mode = WAL');
+} catch (e) {
+  try { db.pragma('journal_mode = DELETE'); } catch (_) {}
+}
 db.pragma('foreign_keys = ON');
 
 /**

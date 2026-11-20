@@ -4,6 +4,18 @@
  * Built for 100% visibility (no blank spaces or stuck opacities)
  */
 
+// Smart API Base URL:
+// - Uses relative URL '' when running on localhost or on Render itself
+// - Uses Render URL 'https://uk-fortfolio.onrender.com' when hosted on Vercel or external domain
+const API_BASE = (() => {
+  if (typeof window === 'undefined') return '';
+  const host = window.location.hostname;
+  if (host === 'localhost' || host === '127.0.0.1' || host.includes('onrender.com')) {
+    return '';
+  }
+  return 'https://uk-fortfolio.onrender.com';
+})();
+
 document.addEventListener('DOMContentLoaded', () => {
   'use strict';
 
@@ -329,7 +341,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       try {
-        const response = await fetch('/api/students', {
+        const response = await fetch(`${API_BASE}/api/students`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

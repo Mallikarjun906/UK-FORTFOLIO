@@ -3,6 +3,18 @@
  * Authentication, search, filtering, table rendering, delete, and CSV export
  */
 
+// Smart API Base URL:
+// - Uses relative URL '' when running on localhost or on Render itself
+// - Uses Render URL 'https://uk-fortfolio.onrender.com' when hosted on Vercel or external domain
+const API_BASE = (() => {
+  if (typeof window === 'undefined') return '';
+  const host = window.location.hostname;
+  if (host === 'localhost' || host === '127.0.0.1' || host.includes('onrender.com')) {
+    return '';
+  }
+  return 'https://uk-fortfolio.onrender.com';
+})();
+
 document.addEventListener('DOMContentLoaded', () => {
   'use strict';
 
@@ -65,7 +77,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   async function verifySession() {
     try {
-      const res = await fetch('/api/admin/verify', {
+      const res = await fetch(`${API_BASE}/api/admin/verify`, {
         headers: { 'Authorization': `Bearer ${currentToken}` }
       });
       if (res.ok) {
@@ -89,7 +101,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!password) return;
 
       try {
-        const res = await fetch('/api/admin/login', {
+        const res = await fetch(`${API_BASE}/api/admin/login`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ password })
@@ -133,7 +145,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (programFilter.value) params.append('program', programFilter.value);
 
     try {
-      const res = await fetch(`/api/students?${params.toString()}`, {
+      const res = await fetch(`${API_BASE}/api/students?${params.toString()}`, {
         headers: { 'Authorization': `Bearer ${currentToken}` }
       });
 
@@ -161,7 +173,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // 4. Load Stats
   async function loadStats() {
     try {
-      const res = await fetch('/api/stats', {
+      const res = await fetch(`${API_BASE}/api/stats`, {
         headers: { 'Authorization': `Bearer ${currentToken}` }
       });
       if (res.ok) {
@@ -272,7 +284,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         try {
-          const res = await fetch(`/api/students/${id}`, {
+          const res = await fetch(`${API_BASE}/api/students/${id}`, {
             method: 'DELETE',
             headers: { 'Authorization': `Bearer ${currentToken}` }
           });
@@ -305,7 +317,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // 6. CSV Export Button
   if (exportCsvBtn) {
     exportCsvBtn.addEventListener('click', () => {
-      window.location.href = `/api/students/export?token=${encodeURIComponent(currentToken)}`;
+      window.location.href = `${API_BASE}/api/students/export?token=${encodeURIComponent(currentToken)}`;
     });
   }
 
