@@ -130,7 +130,8 @@ async function connectDb() {
 
     mongoose.set('strictQuery', false);
     await mongoose.connect(MONGODB_URI, {
-      serverSelectionTimeoutMS: 5000
+      dbName: 'uk_rentserve',
+      serverSelectionTimeoutMS: 8000
     });
 
     console.log(` MongoDB Connected successfully: ${maskMongoUri(MONGODB_URI)}`);
