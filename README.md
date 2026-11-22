@@ -39,9 +39,9 @@ UK FortFolio/
 ├── .env                       # Local environment variables
 ├── .env.example               # Template environment configuration
 ├── server.js                  # Express backend with Helmet, CORS, Rate Limiters
-├── db.js                      # SQLite database layer using better-sqlite3
+├── db.js                      # MongoDB database layer using Mongoose
 ├── data/
-│   └── uk_rentserve.db        # SQLite database file (WAL mode enabled)
+│   └── backup_students.json   # Backup registrations JSON
 ├── public/                    # Production-ready static web application
 │   ├── index.html             # High-converting 12-section portfolio landing page
 │   ├── admin.html             # Password-protected Staff Admin Dashboard
@@ -100,12 +100,12 @@ UK FortFolio/
   - Three.js (r128) with flat shading, mouse inertia, and pause-on-scroll optimization.
   - GSAP 3.12 + ScrollTrigger for scroll-based entrances.
   - Respects `prefers-reduced-motion` with static/gradient fallbacks.
-- **Backend**: Node.js, Express.js (v5), SQLite via `better-sqlite3`.
+- **Backend**: Node.js, Express.js (v5), MongoDB via `mongoose`.
 - **Security**:
   - `helmet` for Content Security Policy and HTTP security headers.
   - `cors` with configurable origin protection.
   - `express-rate-limit` (strict 10 requests / 15 min on student registration).
-  - SQL prepared statements (zero SQL injection risk).
+  - Mongoose schema validation & sanitized queries (NoSQL injection prevention).
   - Server-side payload sanitization and duplicate email/phone conflict handling.
 
 ---

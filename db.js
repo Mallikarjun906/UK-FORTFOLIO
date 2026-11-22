@@ -1,110 +1,201 @@
 /**
  * UK RentServe - Database Layer
- * SQLite database powered by better-sqlite3 with prepared statements
+ * MongoDB database powered by Mongoose
  */
 
 const path = require('path');
 const fs = require('fs');
-const Database = require('better-sqlite3');
+const mongoose = require('mongoose');
 
-// Determine database path with safe fallback for read-only/serverless environments
-let dbPath = process.env.DB_PATH;
-if (!dbPath) {
-  try {
-    const dataDir = path.join(__dirname, 'data');
-    if (!fs.existsSync(dataDir)) {
-      fs.mkdirSync(dataDir, { recursive: true });
+// Determine MongoDB URI from environment or default local MongoDB
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/uk_rentserve';
+
+/**
+ * Mask credentials in MongoDB connection string for safe logging
+ */
+function maskMongoUri(uri) {
+  if (!uri) return '';
+  return uri.replace(/\/\/(.*?):(.*?)@/, '//***:***@');
+}
+
+/**
+ * BCA Student Registration Schema
+ */
+const studentSchema = new mongoose.Schema(
+  {
+    full_name: {
+      type: String,
+      required: [true, 'Full name is required'],
+      trim: true,
+      maxlength: 100
+    },
+    email: {
+      type: String,
+      required: [true, 'Email is required'],
+      trim: true,
+      lowercase: true,
+      maxlength: 120
+    },
+    phone: {
+      type: String,
+      required: [true, 'Phone number is required'],
+      trim: true,
+      maxlength: 15
+    },
+    college_name: {
+      type: String,
+      required: [true, 'College name is required'],
+      trim: true,
+      maxlength: 150
+    },
+    course: {
+      type: String,
+      required: true,
+      default: 'BCA',
+      enum: ['BCA']
+    },
+    year_of_study: {
+      type: String,
+      required: true,
+      enum: ['1st Year', '2nd Year', '3rd Year']
+    },
+    semester: {
+      type: String,
+      required: true,
+      enum: [
+        'Semester 1',
+        'Semester 2',
+        'Semester 3',
+        'Semester 4',
+        'Semester 5',
+        'Semester 6'
+      ]
+    },
+    interest_domain: {
+      type: String,
+      required: true
+    },
+    program_type: {
+      type: String,
+      required: true,
+      enum: ['Internship', 'Project Guidance', 'Both']
+    },
+    message: {
+      type: String,
+      default: '',
+      trim: true,
+      maxlength: 1000
+    },
+    created_at: {
+      type: Date,
+      default: Date.now
     }
-    const testFile = path.join(dataDir, '.write_test');
-    fs.writeFileSync(testFile, '1');
-    fs.unlinkSync(testFile);
-    dbPath = path.join(dataDir, 'uk_rentserve.db');
+  },
+  {
+    versionKey: false,
+    toJSON: {
+      virtuals: true,
+      transform: (doc, ret) => {
+        ret.id = ret._id.toString();
+        delete ret._id;
+        return ret;
+      }
+    },
+    toObject: {
+      virtuals: true,
+      transform: (doc, ret) => {
+        ret.id = ret._id.toString();
+        delete ret._id;
+        return ret;
+      }
+    }
+  }
+);
+
+// Indexes for high search & duplicate check performance
+studentSchema.index({ email: 1 });
+studentSchema.index({ phone: 1 });
+studentSchema.index({ created_at: -1 });
+
+const Student = mongoose.models.Student || mongoose.model('Student', studentSchema);
+
+/**
+ * Connect to MongoDB
+ */
+async function connectDb() {
+  try {
+    if (mongoose.connection.readyState === 1) {
+      return;
+    }
+
+    mongoose.set('strictQuery', false);
+    await mongoose.connect(MONGODB_URI, {
+      serverSelectionTimeoutMS: 5000
+    });
+
+    console.log(` MongoDB Connected successfully: ${maskMongoUri(MONGODB_URI)}`);
+
+    // Auto-seed backup if collection is newly created / empty
+    await autoSeedFromBackup();
   } catch (err) {
-    // Read-only filesystem fallback (e.g. Vercel serverless container)
-    const tmpDir = process.env.TMPDIR || '/tmp';
-    dbPath = path.join(tmpDir, 'uk_rentserve.db');
+    console.warn(`⚠️  MongoDB connection notice: ${err.message}`);
+    console.warn(`   Target URI: ${maskMongoUri(MONGODB_URI)}`);
+    console.warn(`   Configure MONGODB_URI in .env with your MongoDB Atlas or local connection string.`);
   }
 }
 
-const db = new Database(dbPath, {
-  // verbose: process.env.NODE_ENV === 'development' ? console.log : null
-});
+/**
+ * Seed existing data from backup JSON if database is empty
+ */
+async function autoSeedFromBackup() {
+  try {
+    const count = await Student.countDocuments();
+    if (count > 0) return;
 
-// Enable WAL mode if supported, fallback to DELETE
-try {
-  db.pragma('journal_mode = WAL');
-} catch (e) {
-  try { db.pragma('journal_mode = DELETE'); } catch (_) {}
+    const backupFile = path.join(__dirname, 'data', 'backup_students.json');
+    if (fs.existsSync(backupFile)) {
+      const raw = fs.readFileSync(backupFile, 'utf8');
+      const records = JSON.parse(raw);
+      if (Array.isArray(records) && records.length > 0) {
+        const cleanRecords = records.map(r => ({
+          full_name: r.full_name,
+          email: r.email,
+          phone: r.phone,
+          college_name: r.college_name,
+          course: 'BCA',
+          year_of_study: r.year_of_study,
+          semester: r.semester,
+          interest_domain: r.interest_domain,
+          program_type: r.program_type,
+          message: r.message || '',
+          created_at: r.created_at ? new Date(r.created_at) : new Date()
+        }));
+        await Student.insertMany(cleanRecords);
+        console.log(` Seeded ${cleanRecords.length} records from backup into MongoDB.`);
+      }
+    }
+  } catch (err) {
+    console.warn('Could not auto-seed backup records:', err.message);
+  }
 }
-db.pragma('foreign_keys = ON');
 
 /**
- * Initialize the database tables and indexes
+ * Helper to escape regex special characters
  */
-function initDb() {
-  const createTableQuery = `
-    CREATE TABLE IF NOT EXISTS students (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      full_name TEXT NOT NULL,
-      email TEXT NOT NULL,
-      phone TEXT NOT NULL,
-      college_name TEXT NOT NULL,
-      course TEXT NOT NULL CHECK(course = 'BCA'),
-      year_of_study TEXT NOT NULL,
-      semester TEXT NOT NULL,
-      interest_domain TEXT NOT NULL,
-      program_type TEXT NOT NULL,
-      message TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_students_email ON students(email);
-    CREATE INDEX IF NOT EXISTS idx_students_phone ON students(phone);
-    CREATE INDEX IF NOT EXISTS idx_students_created ON students(created_at);
-  `;
-
-  db.exec(createTableQuery);
+function escapeRegex(text) {
+  return String(text).replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&');
 }
-
-// Call initDb immediately to ensure tables exist before preparing statements
-initDb();
-
-// Prepared statements for high performance & security
-const statements = {
-  insertStudent: db.prepare(`
-    INSERT INTO students (
-      full_name, email, phone, college_name, course,
-      year_of_study, semester, interest_domain, program_type, message
-    ) VALUES (
-      @full_name, @email, @phone, @college_name, 'BCA',
-      @year_of_study, @semester, @interest_domain, @program_type, @message
-    )
-  `),
-
-  findByEmailOrPhone: db.prepare(`
-    SELECT id, email, phone, created_at FROM students
-    WHERE LOWER(email) = LOWER(?) OR phone = ?
-    LIMIT 1
-  `),
-
-  findById: db.prepare(`
-    SELECT * FROM students WHERE id = ?
-  `),
-
-  deleteById: db.prepare(`
-    DELETE FROM students WHERE id = ?
-  `)
-};
 
 /**
  * Register a new BCA student
  */
-function createStudent(data) {
-  const info = statements.insertStudent.run({
+async function createStudent(data) {
+  const student = new Student({
     full_name: data.full_name.trim(),
     email: data.email.trim().toLowerCase(),
     phone: data.phone.trim(),
     college_name: data.college_name.trim(),
+    course: 'BCA',
     year_of_study: data.year_of_study,
     semester: data.semester,
     interest_domain: data.interest_domain,
@@ -112,83 +203,112 @@ function createStudent(data) {
     message: data.message ? data.message.trim() : ''
   });
 
-  return statements.findById.get(info.lastInsertRowid);
+  await student.save();
+  return student.toJSON();
 }
 
 /**
  * Check if a student with email or phone already exists
  */
-function checkDuplicate(email, phone) {
-  return statements.findByEmailOrPhone.get(email.trim().toLowerCase(), phone.trim());
+async function checkDuplicate(email, phone) {
+  const cleanEmail = String(email || '').trim().toLowerCase();
+  const cleanPhone = String(phone || '').trim();
+
+  const found = await Student.findOne({
+    $or: [
+      { email: cleanEmail },
+      { phone: cleanPhone }
+    ]
+  }).lean();
+
+  if (!found) return null;
+
+  return {
+    id: found._id.toString(),
+    email: found.email,
+    phone: found.phone,
+    created_at: found.created_at
+  };
 }
 
 /**
- * Get all student registrations with optional search and filters
+ * Get student registrations with optional search and filters
  */
-function getStudents({ search, domain, year, program, limit = 500, offset = 0 } = {}) {
-  let query = `SELECT * FROM students WHERE 1=1`;
-  const params = [];
+async function getStudents({ search, domain, year, program, limit = 500, offset = 0 } = {}) {
+  const filter = {};
 
   if (search && search.trim()) {
-    const term = `%${search.trim().toLowerCase()}%`;
-    query += ` AND (LOWER(full_name) LIKE ? OR LOWER(email) LIKE ? OR phone LIKE ? OR LOWER(college_name) LIKE ?)`;
-    params.push(term, term, term, term);
+    const term = search.trim();
+    const regex = new RegExp(escapeRegex(term), 'i');
+    filter.$or = [
+      { full_name: regex },
+      { email: regex },
+      { phone: regex },
+      { college_name: regex }
+    ];
   }
 
   if (domain && domain !== 'all') {
-    query += ` AND interest_domain = ?`;
-    params.push(domain);
+    filter.interest_domain = domain;
   }
 
   if (year && year !== 'all') {
-    query += ` AND year_of_study = ?`;
-    params.push(year);
+    filter.year_of_study = year;
   }
 
   if (program && program !== 'all') {
-    query += ` AND program_type = ?`;
-    params.push(program);
+    filter.program_type = program;
   }
 
-  query += ` ORDER BY created_at DESC LIMIT ? OFFSET ?`;
-  params.push(Number(limit), Number(offset));
+  const docs = await Student.find(filter)
+    .sort({ created_at: -1 })
+    .skip(Number(offset) || 0)
+    .limit(Number(limit) || 500)
+    .lean();
 
-  const stmt = db.prepare(query);
-  return stmt.all(...params);
+  return docs.map(doc => ({
+    ...doc,
+    id: doc._id.toString()
+  }));
 }
 
 /**
  * Get aggregated statistics for the admin dashboard
  */
-function getStats() {
-  const total = db.prepare(`SELECT COUNT(*) AS count FROM students`).get().count;
+async function getStats() {
+  const total = await Student.countDocuments();
 
-  const byDomain = db.prepare(`
-    SELECT interest_domain, COUNT(*) AS count 
-    FROM students 
-    GROUP BY interest_domain 
-    ORDER BY count DESC
-  `).all();
+  const [byDomain, byYear, byProgram, recentDocs] = await Promise.all([
+    Student.aggregate([
+      { $group: { _id: '$interest_domain', count: { $sum: 1 } } },
+      { $project: { _id: 0, interest_domain: '$_id', count: 1 } },
+      { $sort: { count: -1 } }
+    ]),
+    Student.aggregate([
+      { $group: { _id: '$year_of_study', count: { $sum: 1 } } },
+      { $project: { _id: 0, year_of_study: '$_id', count: 1 } },
+      { $sort: { year_of_study: 1 } }
+    ]),
+    Student.aggregate([
+      { $group: { _id: '$program_type', count: { $sum: 1 } } },
+      { $project: { _id: 0, program_type: '$_id', count: 1 } },
+      { $sort: { count: -1 } }
+    ]),
+    Student.find({})
+      .sort({ created_at: -1 })
+      .limit(5)
+      .select('full_name college_name interest_domain program_type created_at')
+      .lean()
+  ]);
 
-  const byYear = db.prepare(`
-    SELECT year_of_study, COUNT(*) AS count 
-    FROM students 
-    GROUP BY year_of_study 
-    ORDER BY year_of_study ASC
-  `).all();
-
-  const byProgram = db.prepare(`
-    SELECT program_type, COUNT(*) AS count 
-    FROM students 
-    GROUP BY program_type
-  `).all();
-
-  const recent = db.prepare(`
-    SELECT id, full_name, college_name, interest_domain, program_type, created_at 
-    FROM students 
-    ORDER BY created_at DESC 
-    LIMIT 5
-  `).all();
+  const recent = recentDocs.map(r => ({
+    id: r._id.toString(),
+    full_name: r.full_name,
+    college_name: r.college_name,
+    interest_domain: r.interest_domain,
+    program_type: r.program_type,
+    created_at: r.created_at
+  }));
 
   return { total, byDomain, byYear, byProgram, recent };
 }
@@ -196,9 +316,12 @@ function getStats() {
 /**
  * Delete a student record by ID
  */
-function deleteStudent(id) {
-  const result = statements.deleteById.run(id);
-  return result.changes > 0;
+async function deleteStudent(id) {
+  if (!id) return false;
+  if (!mongoose.Types.ObjectId.isValid(id)) return false;
+
+  const result = await Student.findByIdAndDelete(id);
+  return !!result;
 }
 
 /**
@@ -219,8 +342,8 @@ function escapeCsv(val) {
 /**
  * Generate CSV string of all students
  */
-function exportCsv() {
-  const students = db.prepare(`SELECT * FROM students ORDER BY created_at DESC`).all();
+async function exportCsv() {
+  const students = await Student.find({}).sort({ created_at: -1 }).lean();
 
   const headers = [
     'ID',
@@ -238,7 +361,7 @@ function exportCsv() {
   ];
 
   const rows = students.map(s => [
-    escapeCsv(s.id),
+    escapeCsv(s._id ? s._id.toString() : s.id),
     escapeCsv(s.full_name),
     escapeCsv(s.email),
     escapeCsv(s.phone),
@@ -249,18 +372,29 @@ function exportCsv() {
     escapeCsv(s.interest_domain),
     escapeCsv(s.program_type),
     escapeCsv(s.message),
-    escapeCsv(s.created_at)
+    escapeCsv(s.created_at ? new Date(s.created_at).toISOString() : '')
   ].join(','));
 
   return [headers.join(','), ...rows].join('\r\n');
 }
 
-// Initialize tables on startup
-initDb();
+/**
+ * Check if MongoDB connection is active
+ */
+function isConnected() {
+  return mongoose.connection.readyState === 1;
+}
+
+function getDbUri() {
+  return maskMongoUri(MONGODB_URI);
+}
 
 module.exports = {
-  db,
-  initDb,
+  mongoose,
+  Student,
+  connectDb,
+  isConnected,
+  getDbUri,
   createStudent,
   checkDuplicate,
   getStudents,

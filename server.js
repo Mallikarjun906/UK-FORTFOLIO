@@ -1,6 +1,6 @@
 /**
  * UK RentServe - Backend Server
- * Express.js with SQLite (better-sqlite3), Helmet, CORS, Rate Limiting
+ * Express.js with MongoDB (Mongoose), Helmet, CORS, Rate Limiting
  */
 
 require('dotenv').config();
@@ -185,7 +185,7 @@ function normalizePhone(phone) {
  * POST /api/students
  * Validate & save a BCA student registration
  */
-app.post('/api/students', registrationLimiter, (req, res) => {
+app.post('/api/students', registrationLimiter, async (req, res) => {
   try {
     const {
       full_name,
@@ -298,7 +298,7 @@ app.post('/api/students', registrationLimiter, (req, res) => {
     }
 
     // 11. Duplicate check (Email or Phone)
-    const existing = db.checkDuplicate(cleanEmail, cleanPhone);
+    const existing = await db.checkDuplicate(cleanEmail, cleanPhone);
     if (existing) {
       return res.status(409).json({
         success: false,
@@ -308,7 +308,7 @@ app.post('/api/students', registrationLimiter, (req, res) => {
     }
 
     // 12. Create record
-    const newStudent = db.createStudent({
+    const newStudent = await db.createStudent({
       full_name: cleanName,
       email: cleanEmail,
       phone: cleanPhone,
@@ -371,10 +371,10 @@ app.get('/api/admin/verify', requireAdmin, (req, res) => {
  * GET /api/students
  * Admin: List registrations with search and filtering
  */
-app.get('/api/students', requireAdmin, (req, res) => {
+app.get('/api/students', requireAdmin, async (req, res) => {
   try {
     const { search, domain, year, program, limit, offset } = req.query;
-    const students = db.getStudents({ search, domain, year, program, limit, offset });
+    const students = await db.getStudents({ search, domain, year, program, limit, offset });
     res.json({
       success: true,
       count: students.length,
@@ -390,9 +390,9 @@ app.get('/api/students', requireAdmin, (req, res) => {
  * GET /api/students/export
  * Admin: Download registrations as CSV
  */
-app.get('/api/students/export', requireAdmin, (req, res) => {
+app.get('/api/students/export', requireAdmin, async (req, res) => {
   try {
-    const csvData = db.exportCsv();
+    const csvData = await db.exportCsv();
     const filename = `UK_RentServe_BCA_Registrations_${new Date().toISOString().slice(0, 10)}.csv`;
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
@@ -408,9 +408,9 @@ app.get('/api/students/export', requireAdmin, (req, res) => {
  * GET /api/stats
  * Admin: Aggregated registration statistics
  */
-app.get('/api/stats', requireAdmin, (req, res) => {
+app.get('/api/stats', requireAdmin, async (req, res) => {
   try {
-    const stats = db.getStats();
+    const stats = await db.getStats();
     res.json({ success: true, stats });
   } catch (err) {
     console.error('Admin getStats error:', err);
@@ -422,14 +422,14 @@ app.get('/api/stats', requireAdmin, (req, res) => {
  * DELETE /api/students/:id
  * Admin: Delete a student record
  */
-app.delete('/api/students/:id', requireAdmin, (req, res) => {
+app.delete('/api/students/:id', requireAdmin, async (req, res) => {
   try {
-    const id = parseInt(req.params.id, 10);
-    if (isNaN(id)) {
+    const id = req.params.id;
+    if (!id) {
       return res.status(400).json({ success: false, message: 'Invalid student ID.' });
     }
 
-    const deleted = db.deleteStudent(id);
+    const deleted = await db.deleteStudent(id);
     if (!deleted) {
       return res.status(404).json({ success: false, message: 'Student record not found.' });
     }
@@ -455,15 +455,24 @@ app.use((req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Start server
-if (process.env.NODE_ENV !== 'test') {
-  app.listen(PORT, () => {
-    console.log(`===============================================`);
-    console.log(`  UK RentServe Server running on port ${PORT}`);
-    console.log(`  Live URL: http://localhost:${PORT}`);
-    console.log(`  Admin Dashboard: http://localhost:${PORT}/admin`);
-    console.log(`===============================================`);
-  });
+// Connect to MongoDB & start server
+async function startServer() {
+  await db.connectDb();
+
+  if (process.env.NODE_ENV !== 'test') {
+    app.listen(PORT, () => {
+      console.log(`===============================================`);
+      console.log(`  UK RentServe Server running on port ${PORT}`);
+      console.log(`  Database: MongoDB (${db.getDbUri()})`);
+      console.log(`  Live URL: http://localhost:${PORT}`);
+      console.log(`  Admin Dashboard: http://localhost:${PORT}/admin`);
+      console.log(`===============================================`);
+    });
+  }
 }
+
+startServer().catch(err => {
+  console.error('Error starting server:', err);
+});
 
 module.exports = app;
